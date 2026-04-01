@@ -748,6 +748,8 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
   const [allRes, setAllRes] = useState<Reservation[]>([])
   const [allUsers, setAllUsers] = useState<AdminUser[]>([])
   const [loading, setLoading] = useState(true)
+  const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
+  const [editName, setEditName] = useState('')
 
   const loadAdmin = useCallback(async () => {
     setLoading(true)
@@ -768,6 +770,14 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
     const action = currentStatus ? 'remover admin de' : 'tornar admin'
     if (!confirm(`Deseja ${action} este usuário?`)) return
     await supabase.from('users').update({ is_admin: !currentStatus }).eq('id', userId)
+    loadAdmin()
+  }
+
+  const saveUserName = async () => {
+    if (!editingUser || !editName.trim()) return
+    await supabase.from('users').update({ name: editName.trim() }).eq('id', editingUser.id)
+    setEditingUser(null)
+    setEditName('')
     loadAdmin()
   }
 
@@ -826,7 +836,17 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
             <tbody className="divide-y divide-gray-50">
               {allUsers.map(u => (
                 <tr key={u.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{u.name}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-medium text-gray-900">{u.name}</span>
+                      <button onClick={() => { setEditingUser(u); setEditName(u.name) }}
+                        className="text-gray-400 hover:text-[#4a7c59] transition-colors" title="Editar nome">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-600">{u.house}</td>
                   <td className="px-4 py-3 text-sm text-gray-600">{u.phone}</td>
                   <td className="px-4 py-3 text-center">
@@ -884,6 +904,36 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
           </table>
         </div>
       </div>
+
+      {/* EDIT USER NAME MODAL */}
+      {editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setEditingUser(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-lg font-bold text-gray-900">Editar Usuário</h2>
+            <div className="bg-gray-50 rounded-xl p-3 text-sm text-gray-600">
+              <p>{editingUser.house} · {editingUser.phone}</p>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Nome</label>
+              <input type="text" value={editName}
+                onChange={e => setEditName(e.target.value)}
+                className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#4a7c59]"
+                autoFocus />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setEditingUser(null)}
+                className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
+              <button onClick={saveUserName}
+                disabled={!editName.trim()}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40"
+                style={{ backgroundColor: '#4a7c59' }}>
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

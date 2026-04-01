@@ -14,7 +14,7 @@ type User = {
 type AuthContextType = {
   user: User | null
   loading: boolean
-  login: (name: string, phone: string) => Promise<{ error?: string }>
+  login: (phone: string) => Promise<{ error?: string }>
   register: (name: string, house: string, phone: string) => Promise<{ error?: string }>
   logout: () => void
 }
@@ -35,16 +35,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false)
   }, [])
 
-  const login = async (name: string, phone: string): Promise<{ error?: string }> => {
+  const login = async (phone: string): Promise<{ error?: string }> => {
     const cleanPhone = phone.replace(/\D/g, '')
     const { data, error } = await supabase
       .from('users')
       .select('*')
-      .ilike('name', name.trim())
       .eq('phone', cleanPhone)
       .single()
 
-    if (error || !data) return { error: 'Nome ou telefone não encontrados. Verifique os dados ou faça seu cadastro.' }
+    if (error || !data) return { error: 'Telefone não encontrado. Verifique o número ou faça seu cadastro.' }
 
     setUser(data)
     localStorage.setItem('rp_user', JSON.stringify(data))

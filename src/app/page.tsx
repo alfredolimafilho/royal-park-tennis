@@ -50,26 +50,37 @@ export default function Home() {
             </div>
 
             <div className="p-6 space-y-4">
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Nome completo</label>
-                <input type="text" placeholder="Seu nome"
-                  value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                  className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#4a7c59] transition-colors" />
-              </div>
-              {tab === 'register' && (
-                <div>
-                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Casa</label>
-                  <input type="text" placeholder="Ex: Casa 12"
-                    value={form.house} onChange={e => setForm(f => ({ ...f, house: e.target.value }))}
-                    className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#4a7c59] transition-colors" />
-                </div>
+              {tab === 'login' ? (
+                <>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Telefone</label>
+                    <input type="tel" placeholder="(85) 99999-9999"
+                      value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+                      className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#4a7c59] transition-colors" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Nome e Sobrenome</label>
+                    <input type="text" placeholder="Ex: João Silva"
+                      value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                      className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#4a7c59] transition-colors" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Casa</label>
+                    <input type="text" placeholder="Ex: Casa 12"
+                      value={form.house} onChange={e => setForm(f => ({ ...f, house: e.target.value }))}
+                      className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#4a7c59] transition-colors" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Telefone</label>
+                    <input type="tel" placeholder="(85) 99999-9999"
+                      value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+                      className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#4a7c59] transition-colors" />
+                  </div>
+                </>
               )}
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Telefone</label>
-                <input type="tel" placeholder="(85) 99999-9999"
-                  value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                  className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#4a7c59] transition-colors" />
-              </div>
 
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">{error}</div>
@@ -79,12 +90,12 @@ export default function Home() {
                 disabled={submitting}
                 onClick={async () => {
                   setError('')
-                  if (!form.name.trim()) { setError('Preencha seu nome.'); return }
-                  if (tab === 'register' && !form.house.trim()) { setError('Preencha a casa.'); return }
                   if (!form.phone.trim()) { setError('Preencha o telefone.'); return }
+                  if (tab === 'register' && !form.name.trim()) { setError('Preencha seu nome e sobrenome.'); return }
+                  if (tab === 'register' && !form.house.trim()) { setError('Preencha a casa.'); return }
                   setSubmitting(true)
                   const result = tab === 'login'
-                    ? await login(form.name.trim(), form.phone.trim())
+                    ? await login(form.phone.trim())
                     : await register(form.name.trim(), form.house.trim(), form.phone.trim())
                   if (result.error) setError(result.error)
                   setSubmitting(false)
