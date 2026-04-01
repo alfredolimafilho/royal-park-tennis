@@ -39,9 +39,9 @@ function fmtDateISO(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-function endTimeForSlot(slot: string): string {
+function calcEndTime(slot: string, durationMin: number = 60): string {
   const [h, m] = slot.split(':').map(Number)
-  const totalMin = h * 60 + m + 60
+  const totalMin = h * 60 + m + durationMin
   return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`
 }
 
@@ -95,9 +95,12 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
   const [selectedSlot, setSelectedSlot] = useState<{ date: string; time: string } | null>(null)
   const [editingRes, setEditingRes] = useState<Reservation | null>(null)
 
+  // Duration for new reservations (30 or 60 min)
+  const [duration, setDuration] = useState<30 | 60>(60)
+
   // Fixed reservation modal
   const [showFixedModal, setShowFixedModal] = useState(false)
-  const [fixedForm, setFixedForm] = useState({ day_of_week: 1, start_time: '17:00' })
+  const [fixedForm, setFixedForm] = useState({ day_of_week: 1, start_time: '17:00', duration: 60 as 30 | 60 })
 
   const weekDates = getWeekDates(weekBase)
 
@@ -124,7 +127,7 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
   function getSlotOccupant(date: Date, time: string): { type: 'fixed' | 'reservation'; house: string; name?: string; phone?: string; id?: string; userId?: string; startTime?: string; endTime?: string } | null {
     const dateStr = fmtDateISO(date)
     const dayOfWeek = date.getDay()
-    const slotEnd = endTimeForSlot(time)
+    const slotEnd = calcEndTime(time)
 
     // Check fixed reservations
     for (const fr of fixedRes) {
@@ -144,16 +147,15 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
   }
 
   // Check if a house can reserve at this date (max 1h contiguous, max 2 distinct slots)
-  function canReserve(date: string, startTime: string): { ok: boolean; reason?: string } {
-    const endTime = endTimeForSlot(startTime)
+  function canReserve(date: string, startTime: string, dur: number = 60): { ok: boolean; reason?: string } {
+    const endTime = calcEndTime(startTime, dur)
     const dayOfWeek = new Date(date + 'T12:00:00').getDay()
 
-    // Check if slot already taken
+    // Check end time doesn't exceed 23:00
+    if (endTime > '23:00') return { ok: false, reason: 'A quadra funciona até 23:00.' }
+
+    // Check if any slot in the range is already taken
     const dt = new Date(date + 'T12:00:00')
-    // Check both 30-min halves
-    if (getSlotOccupant(dt, startTime)) return { ok: false, reason: 'Horário já reservado.' }
-    const halfTime = `${String(parseInt(startTime.split(':')[0])).padStart(2, '0')}:${startTime.split(':')[1] === '00' ? '30' : '00'}`
-    // Actually check if the full hour overlaps with anything
     for (const slot of SLOTS) {
       if (slot >= startTime && slot < endTime && getSlotOccupant(dt, slot)) {
         return { ok: false, reason: 'Horário já reservado.' }
@@ -164,7 +166,6 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
     const houseResOnDate = reservations.filter(r =>
       r.reservation_date === date && r.house === user.house
     )
-    // Also count fixed for this day
     const houseFixedOnDay = fixedRes.filter(f =>
       f.day_of_week === dayOfWeek && f.house === user.house
     )
@@ -172,15 +173,34 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
     const totalSlots = houseResOnDate.length + houseFixedOnDay.length
     if (totalSlots >= 2) return { ok: false, reason: 'Sua casa já tem 2 reservas neste dia.' }
 
-    // Check no adjacent (contiguous) - new reservation can't be adjacent to existing
+    // Check total contiguous time doesn't exceed 1h
+    // A new reservation can't be adjacent to an existing one if together they exceed 1h
     for (const r of houseResOnDate) {
-      if (r.end_time === startTime || endTime === r.start_time) {
-        return { ok: false, reason: 'Não é permitido reservar horários consecutivos (máximo 1h seguida).' }
+      const rStart = r.start_time.slice(0, 5)
+      const rEnd = r.end_time.slice(0, 5)
+      // Calculate existing duration in minutes
+      const [rh1, rm1] = rStart.split(':').map(Number)
+      const [rh2, rm2] = rEnd.split(':').map(Number)
+      const existingDur = (rh2 * 60 + rm2) - (rh1 * 60 + rm1)
+      // If adjacent and combined > 60min, block
+      if (r.end_time.slice(0, 5) === startTime && existingDur + dur > 60) {
+        return { ok: false, reason: 'Não é permitido ultrapassar 1h seguida de reserva.' }
+      }
+      if (endTime === rStart && existingDur + dur > 60) {
+        return { ok: false, reason: 'Não é permitido ultrapassar 1h seguida de reserva.' }
       }
     }
     for (const f of houseFixedOnDay) {
-      if (f.end_time === startTime || endTime === f.start_time) {
-        return { ok: false, reason: 'Não é permitido reservar horário consecutivo à sua reserva fixa.' }
+      const fStart = f.start_time.slice(0, 5)
+      const fEnd = f.end_time.slice(0, 5)
+      const [fh1, fm1] = fStart.split(':').map(Number)
+      const [fh2, fm2] = fEnd.split(':').map(Number)
+      const existingDur = (fh2 * 60 + fm2) - (fh1 * 60 + fm1)
+      if (fEnd === startTime && existingDur + dur > 60) {
+        return { ok: false, reason: 'Não é permitido ultrapassar 1h seguida (inclui sua reserva fixa).' }
+      }
+      if (endTime === fStart && existingDur + dur > 60) {
+        return { ok: false, reason: 'Não é permitido ultrapassar 1h seguida (inclui sua reserva fixa).' }
       }
     }
 
@@ -203,7 +223,7 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
   const saveReservation = async () => {
     if (!selectedSlot) return
     const { date, time } = selectedSlot
-    const check = canReserve(date, time)
+    const check = canReserve(date, time, duration)
     if (!check.ok) { alert(check.reason); return }
 
     await supabase.from('reservations').insert({
@@ -212,9 +232,10 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
       phone: user.phone,
       reservation_date: date,
       start_time: time,
-      end_time: endTimeForSlot(time),
+      end_time: calcEndTime(time, duration),
     })
     setShowModal(false)
+    setDuration(60)
     load()
   }
 
@@ -229,7 +250,7 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
     await supabase.from('reservations').update({
       reservation_date: newDate,
       start_time: newTime,
-      end_time: endTimeForSlot(newTime),
+      end_time: calcEndTime(newTime),
     }).eq('id', id)
     setShowModal(false)
     load()
@@ -242,10 +263,11 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
       house: user.house,
       day_of_week: fixedForm.day_of_week,
       start_time: fixedForm.start_time,
-      end_time: endTimeForSlot(fixedForm.start_time),
+      end_time: calcEndTime(fixedForm.start_time, fixedForm.duration),
       status: 'pending',
     })
     setShowFixedModal(false)
+    setFixedForm({ day_of_week: 1, start_time: '17:00', duration: 60 })
     alert('Solicitação enviada! Aguarde a aprovação do administrador.')
     load()
   }
@@ -489,27 +511,43 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
             {modalMode === 'create' && selectedSlot && (
               <>
                 <h2 className="text-lg font-bold text-gray-900">Nova Reserva</h2>
+
+                {/* Duração */}
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Duração</label>
+                  <div className="flex gap-2 mt-1">
+                    <button onClick={() => setDuration(30)}
+                      className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${duration === 30 ? 'bg-[#4a7c59] text-white border-[#4a7c59]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                      30 min
+                    </button>
+                    <button onClick={() => setDuration(60)}
+                      className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${duration === 60 ? 'bg-[#4a7c59] text-white border-[#4a7c59]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                      1 hora
+                    </button>
+                  </div>
+                </div>
+
                 <div className="bg-green-50 border border-green-200 rounded-xl p-4">
                   <p className="text-sm font-semibold text-green-800">
                     {new Date(selectedSlot.date + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
                   </p>
                   <p className="text-2xl font-bold text-green-900 mt-1">
-                    {selectedSlot.time} — {endTimeForSlot(selectedSlot.time)}
+                    {selectedSlot.time} — {calcEndTime(selectedSlot.time, duration)}
                   </p>
-                  <p className="text-xs text-green-600 mt-1">{user.house} · {user.name}</p>
+                  <p className="text-xs text-green-600 mt-1">{user.house} · {user.name} · {duration} min</p>
                 </div>
                 {(() => {
-                  const check = canReserve(selectedSlot.date, selectedSlot.time)
+                  const check = canReserve(selectedSlot.date, selectedSlot.time, duration)
                   if (!check.ok) return (
                     <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">{check.reason}</div>
                   )
                   return null
                 })()}
                 <div className="flex gap-3">
-                  <button onClick={() => setShowModal(false)}
+                  <button onClick={() => { setShowModal(false); setDuration(60) }}
                     className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
                   <button onClick={saveReservation}
-                    disabled={!canReserve(selectedSlot.date, selectedSlot.time).ok}
+                    disabled={!canReserve(selectedSlot.date, selectedSlot.time, duration).ok}
                     className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40"
                     style={{ backgroundColor: '#4a7c59' }}>
                     Confirmar
@@ -565,13 +603,26 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
               <select value={fixedForm.start_time}
                 onChange={e => setFixedForm(f => ({ ...f, start_time: e.target.value }))}
                 className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#4a7c59]">
-                {SLOTS.map(s => <option key={s} value={s}>{s} — {endTimeForSlot(s)}</option>)}
+                {SLOTS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Duração</label>
+              <div className="flex gap-2 mt-1">
+                <button onClick={() => setFixedForm(f => ({ ...f, duration: 30 }))}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${fixedForm.duration === 30 ? 'bg-[#4a7c59] text-white border-[#4a7c59]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                  30 min
+                </button>
+                <button onClick={() => setFixedForm(f => ({ ...f, duration: 60 }))}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${fixedForm.duration === 60 ? 'bg-[#4a7c59] text-white border-[#4a7c59]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                  1 hora
+                </button>
+              </div>
             </div>
 
             <div className="bg-gray-50 rounded-xl p-3 text-sm text-gray-600">
               <p><span className="font-semibold">{user.house}</span> · Toda {DAYS_FULL[fixedForm.day_of_week].toLowerCase()}</p>
-              <p className="font-bold text-gray-900">{fixedForm.start_time} — {endTimeForSlot(fixedForm.start_time)}</p>
+              <p className="font-bold text-gray-900">{fixedForm.start_time} — {calcEndTime(fixedForm.start_time, fixedForm.duration)} ({fixedForm.duration} min)</p>
             </div>
 
             <div className="flex gap-3">
