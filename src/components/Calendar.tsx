@@ -7,10 +7,12 @@ type User = { id: string; name: string; house: string; phone: string; is_admin: 
 type Reservation = {
   id: string; user_id: string; house: string; phone: string | null
   reservation_date: string; start_time: string; end_time: string; notes: string | null
+  users?: { name: string }
 }
 type FixedReservation = {
   id: string; user_id: string; house: string
   day_of_week: number; start_time: string; end_time: string; status: string
+  users?: { name: string; phone: string }
 }
 
 const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
@@ -49,8 +51,7 @@ function whatsappLink(phone: string, house: string): string {
   return `https://wa.me/${num}?text=${encodeURIComponent(`Olá! Sou da ${house} do Royal Park, sobre a reserva da quadra de tênis...`)}`
 }
 
-// Coluna de cores por casa para diferenciar visualmente
-const HOUSE_COLORS: Record<string, { bg: string; text: string; border: string }> = {}
+// Cor fixa por casa — hash determinístico para mesma casa = mesma cor sempre
 const PALETTE = [
   { bg: '#dcfce7', text: '#166534', border: '#86efac' },
   { bg: '#dbeafe', text: '#1e40af', border: '#93c5fd' },
@@ -58,18 +59,27 @@ const PALETTE = [
   { bg: '#fef3c7', text: '#92400e', border: '#fcd34d' },
   { bg: '#e0e7ff', text: '#3730a3', border: '#a5b4fc' },
   { bg: '#ffe4e6', text: '#9f1239', border: '#fda4af' },
-  { bg: '#f0fdf4', text: '#15803d', border: '#86efac' },
   { bg: '#ecfeff', text: '#155e75', border: '#67e8f9' },
   { bg: '#fdf4ff', text: '#86198f', border: '#e879f9' },
   { bg: '#fff7ed', text: '#9a3412', border: '#fdba74' },
+  { bg: '#f0fdf4', text: '#15803d', border: '#4ade80' },
+  { bg: '#fef9c3', text: '#854d0e', border: '#facc15' },
+  { bg: '#e8d5f5', text: '#6b21a8', border: '#c084fc' },
+  { bg: '#d1fae5', text: '#065f46', border: '#34d399' },
+  { bg: '#fee2e2', text: '#991b1b', border: '#f87171' },
+  { bg: '#cffafe', text: '#164e63', border: '#22d3ee' },
+  { bg: '#fde68a', text: '#78350f', border: '#f59e0b' },
 ]
-let colorIdx = 0
-function getHouseColor(house: string) {
-  if (!HOUSE_COLORS[house]) {
-    HOUSE_COLORS[house] = PALETTE[colorIdx % PALETTE.length]
-    colorIdx++
+function hashCode(str: string): number {
+  let h = 0
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h) + str.charCodeAt(i)
+    h |= 0
   }
-  return HOUSE_COLORS[house]
+  return Math.abs(h)
+}
+function getHouseColor(house: string) {
+  return PALETTE[hashCode(house) % PALETTE.length]
 }
 
 export default function Calendar({ user, onLogout }: { user: User; onLogout: () => void }) {
@@ -97,11 +107,11 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
     const endDate = fmtDateISO(weekDates[6])
 
     const [{ data: res }, { data: fixed }] = await Promise.all([
-      supabase.from('reservations').select('*')
+      supabase.from('reservations').select('*, users:user_id(name)')
         .gte('reservation_date', startDate)
         .lte('reservation_date', endDate)
         .order('start_time'),
-      supabase.from('fixed_reservations').select('*').eq('status', 'approved'),
+      supabase.from('fixed_reservations').select('*, users(name, phone)').eq('status', 'approved'),
     ])
     setReservations(res || [])
     setFixedRes(fixed || [])
@@ -111,7 +121,7 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
   useEffect(() => { load() }, [load])
 
   // Get what occupies a slot
-  function getSlotOccupant(date: Date, time: string): { type: 'fixed' | 'reservation'; house: string; phone?: string; id?: string; userId?: string } | null {
+  function getSlotOccupant(date: Date, time: string): { type: 'fixed' | 'reservation'; house: string; name?: string; phone?: string; id?: string; userId?: string; startTime?: string; endTime?: string } | null {
     const dateStr = fmtDateISO(date)
     const dayOfWeek = date.getDay()
     const slotEnd = endTimeForSlot(time)
@@ -119,14 +129,14 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
     // Check fixed reservations
     for (const fr of fixedRes) {
       if (fr.day_of_week === dayOfWeek && fr.start_time <= time && fr.end_time > time) {
-        return { type: 'fixed', house: fr.house, id: fr.id, userId: fr.user_id }
+        return { type: 'fixed', house: fr.house, name: fr.users?.name, phone: fr.users?.phone, id: fr.id, userId: fr.user_id, startTime: fr.start_time.slice(0, 5), endTime: fr.end_time.slice(0, 5) }
       }
     }
 
     // Check regular reservations
     for (const r of reservations) {
       if (r.reservation_date === dateStr && r.start_time <= time && r.end_time > time) {
-        return { type: 'reservation', house: r.house, phone: r.phone || undefined, id: r.id, userId: r.user_id }
+        return { type: 'reservation', house: r.house, name: r.users?.name, phone: r.phone || undefined, id: r.id, userId: r.user_id, startTime: r.start_time.slice(0, 5), endTime: r.end_time.slice(0, 5) }
       }
     }
 
@@ -393,8 +403,9 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
                                   }}
                                 >
                                   <div>
+                                    {occupant.name && <p className="text-[10px] font-bold leading-tight truncate">{occupant.name}</p>}
                                     <p className="text-xs font-bold leading-tight">{occupant.house}</p>
-                                    <p className="text-[10px] opacity-70">{occupant.type === 'fixed' ? 'Fixa' : 'Avulsa'}</p>
+                                    <p className="text-[10px] opacity-70">{occupant.type === 'fixed' ? 'Fixa' : 'Avulsa'} · {occupant.startTime}-{occupant.endTime}</p>
                                   </div>
                                   {occupant.phone && (
                                     <a href={whatsappLink(occupant.phone, occupant.house)}
@@ -679,23 +690,35 @@ function FixedTab({ user, fixedRes, onRequest, onRefresh }: {
 }
 
 // ADMIN TAB COMPONENT
+type AdminUser = { id: string; name: string; house: string; phone: string; is_admin: boolean; created_at: string }
+
 function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; onReject: (id: string) => void }) {
   const [pending, setPending] = useState<(FixedReservation & { users?: { name: string; house: string; phone: string } })[]>([])
   const [allRes, setAllRes] = useState<Reservation[]>([])
+  const [allUsers, setAllUsers] = useState<AdminUser[]>([])
   const [loading, setLoading] = useState(true)
 
   const loadAdmin = useCallback(async () => {
     setLoading(true)
-    const [{ data: pend }, { data: res }] = await Promise.all([
+    const [{ data: pend }, { data: res }, { data: users }] = await Promise.all([
       supabase.from('fixed_reservations').select('*, users(name, house, phone)').eq('status', 'pending'),
       supabase.from('reservations').select('*').gte('reservation_date', fmtDateISO(new Date())).order('reservation_date'),
+      supabase.from('users').select('*').order('house'),
     ])
     setPending(pend || [])
     setAllRes(res || [])
+    setAllUsers(users || [])
     setLoading(false)
   }, [])
 
   useEffect(() => { loadAdmin() }, [loadAdmin])
+
+  const toggleAdmin = async (userId: string, currentStatus: boolean) => {
+    const action = currentStatus ? 'remover admin de' : 'tornar admin'
+    if (!confirm(`Deseja ${action} este usuário?`)) return
+    await supabase.from('users').update({ is_admin: !currentStatus }).eq('id', userId)
+    loadAdmin()
+  }
 
   return (
     <div className="space-y-6">
@@ -733,6 +756,51 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
             ))}
           </div>
         )}
+      </div>
+
+      {/* All registered users */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">Usuários Cadastrados ({allUsers.length})</h3>
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-left">Nome</th>
+                <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-left">Casa</th>
+                <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-left">Telefone</th>
+                <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-center">Perfil</th>
+                <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-center">Ação</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {allUsers.map(u => (
+                <tr key={u.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900">{u.name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{u.house}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{u.phone}</td>
+                  <td className="px-4 py-3 text-center">
+                    {u.is_admin ? (
+                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700">Admin</span>
+                    ) : (
+                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-gray-100 text-gray-500">Morador</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      onClick={() => toggleAdmin(u.id, u.is_admin)}
+                      className={`text-xs px-3 py-1.5 rounded-lg font-medium border transition-colors ${
+                        u.is_admin
+                          ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                          : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                      }`}>
+                      {u.is_admin ? 'Remover Admin' : 'Tornar Admin'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Upcoming reservations */}
