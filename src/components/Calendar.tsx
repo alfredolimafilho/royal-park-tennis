@@ -750,6 +750,7 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
   const [loading, setLoading] = useState(true)
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
   const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
 
   const loadAdmin = useCallback(async () => {
     setLoading(true)
@@ -773,11 +774,21 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
     loadAdmin()
   }
 
-  const saveUserName = async () => {
-    if (!editingUser || !editName.trim()) return
-    await supabase.from('users').update({ name: editName.trim() }).eq('id', editingUser.id)
+  const saveUser = async () => {
+    if (!editingUser || !editName.trim() || !editPhone.trim()) return
+    const cleanPhone = editPhone.replace(/\D/g, '')
+    await supabase.from('users').update({ name: editName.trim(), phone: cleanPhone }).eq('id', editingUser.id)
     setEditingUser(null)
     setEditName('')
+    setEditPhone('')
+    loadAdmin()
+  }
+
+  const deleteUser = async (userId: string, userName: string) => {
+    if (!confirm(`Deseja excluir o usuário "${userName}"? Todas as reservas dele serão removidas.`)) return
+    await supabase.from('reservations').delete().eq('user_id', userId)
+    await supabase.from('fixed_reservations').delete().eq('user_id', userId)
+    await supabase.from('users').delete().eq('id', userId)
     loadAdmin()
   }
 
@@ -839,7 +850,7 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm font-medium text-gray-900">{u.name}</span>
-                      <button onClick={() => { setEditingUser(u); setEditName(u.name) }}
+                      <button onClick={() => { setEditingUser(u); setEditName(u.name); setEditPhone(u.phone) }}
                         className="text-gray-400 hover:text-[#4a7c59] transition-colors" title="Editar nome">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -857,15 +868,25 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
                     )}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <button
-                      onClick={() => toggleAdmin(u.id, u.is_admin)}
-                      className={`text-xs px-3 py-1.5 rounded-lg font-medium border transition-colors ${
-                        u.is_admin
-                          ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
-                          : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                      }`}>
-                      {u.is_admin ? 'Remover Admin' : 'Tornar Admin'}
-                    </button>
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button
+                        onClick={() => toggleAdmin(u.id, u.is_admin)}
+                        className={`text-xs px-2.5 py-1.5 rounded-lg font-medium border transition-colors ${
+                          u.is_admin
+                            ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                            : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                        }`}>
+                        {u.is_admin ? 'Remover Admin' : 'Tornar Admin'}
+                      </button>
+                      <button
+                        onClick={() => deleteUser(u.id, u.name)}
+                        className="text-xs px-2.5 py-1.5 rounded-lg font-medium border bg-white text-red-500 border-red-200 hover:bg-red-50 transition-colors"
+                        title="Excluir usuário">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -912,7 +933,7 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
             <h2 className="text-lg font-bold text-gray-900">Editar Usuário</h2>
             <div className="bg-gray-50 rounded-xl p-3 text-sm text-gray-600">
-              <p>{editingUser.house} · {editingUser.phone}</p>
+              <p>{editingUser.house}</p>
             </div>
             <div>
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Nome</label>
@@ -921,11 +942,17 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
                 className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#4a7c59]"
                 autoFocus />
             </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Telefone (usado para login)</label>
+              <input type="tel" value={editPhone}
+                onChange={e => setEditPhone(e.target.value)}
+                className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#4a7c59]" />
+            </div>
             <div className="flex gap-3">
               <button onClick={() => setEditingUser(null)}
                 className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
-              <button onClick={saveUserName}
-                disabled={!editName.trim()}
+              <button onClick={saveUser}
+                disabled={!editName.trim() || !editPhone.trim()}
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40"
                 style={{ backgroundColor: '#4a7c59' }}>
                 Salvar
