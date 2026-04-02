@@ -646,18 +646,55 @@ function FixedTab({ user, fixedRes, onRequest, onRefresh }: {
   user: User; fixedRes: FixedReservation[]; onRequest: () => void; onRefresh: () => void
 }) {
   const [allFixed, setAllFixed] = useState<FixedReservation[]>([])
+  const [allUsers, setAllUsers] = useState<{ id: string; name: string; house: string }[]>([])
   const [loading, setLoading] = useState(true)
+  const [editingFixed, setEditingFixed] = useState<FixedReservation | null>(null)
+  const [editFixedForm, setEditFixedForm] = useState({ day_of_week: 0, start_time: '17:00', duration: 60 as 30 | 60, house: '' })
 
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from('fixed_reservations').select('*').order('day_of_week')
-      setAllFixed(data || [])
-      setLoading(false)
-    })()
-  }, [fixedRes])
+  const loadFixed = useCallback(async () => {
+    const [{ data: fixed }, { data: users }] = await Promise.all([
+      supabase.from('fixed_reservations').select('*, users(name, phone)').order('day_of_week'),
+      supabase.from('users').select('id, name, house').order('house'),
+    ])
+    setAllFixed(fixed || [])
+    setAllUsers(users || [])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { loadFixed() }, [loadFixed, fixedRes])
 
   const myFixed = allFixed.filter(f => f.user_id === user.id)
   const approvedFixed = allFixed.filter(f => f.status === 'approved')
+
+  const deleteFixed = async (id: string) => {
+    if (!confirm('Deseja excluir esta reserva fixa?')) return
+    await supabase.from('fixed_reservations').delete().eq('id', id)
+    loadFixed()
+    onRefresh()
+  }
+
+  const openEditFixed = (f: FixedReservation) => {
+    const [sh, sm] = f.start_time.slice(0, 5).split(':').map(Number)
+    const [eh, em] = f.end_time.slice(0, 5).split(':').map(Number)
+    const dur = (eh * 60 + em) - (sh * 60 + sm)
+    setEditFixedForm({ day_of_week: f.day_of_week, start_time: f.start_time.slice(0, 5), duration: dur === 30 ? 30 : 60, house: f.house })
+    setEditingFixed(f)
+  }
+
+  const saveEditFixed = async () => {
+    if (!editingFixed) return
+    const selectedUser = allUsers.find(u => u.house === editFixedForm.house)
+    await supabase.from('fixed_reservations').update({
+      day_of_week: editFixedForm.day_of_week,
+      start_time: editFixedForm.start_time,
+      end_time: calcEndTime(editFixedForm.start_time, editFixedForm.duration),
+      house: editFixedForm.house,
+      user_id: selectedUser?.id || editingFixed.user_id,
+    }).eq('id', editingFixed.id)
+    setEditingFixed(null)
+    loadFixed()
+    onRefresh()
+  }
 
   return (
     <div className="space-y-6">
@@ -710,13 +747,14 @@ function FixedTab({ user, fixedRes, onRequest, onRefresh }: {
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-left">Dia</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-left">Horário</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-left">Casa</th>
+                {user.is_admin && <th className="px-4 py-3 text-xs font-semibold text-gray-500 text-center">Ações</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {loading ? (
-                <tr><td colSpan={3} className="py-8 text-center text-sm text-gray-400">Carregando...</td></tr>
+                <tr><td colSpan={user.is_admin ? 4 : 3} className="py-8 text-center text-sm text-gray-400">Carregando...</td></tr>
               ) : approvedFixed.length === 0 ? (
-                <tr><td colSpan={3} className="py-8 text-center text-sm text-gray-400">Nenhuma reserva fixa aprovada</td></tr>
+                <tr><td colSpan={user.is_admin ? 4 : 3} className="py-8 text-center text-sm text-gray-400">Nenhuma reserva fixa aprovada</td></tr>
               ) : (
                 approvedFixed.map(f => {
                   const colors = getHouseColor(f.house)
@@ -728,6 +766,26 @@ function FixedTab({ user, fixedRes, onRequest, onRefresh }: {
                         <span className="text-xs font-semibold px-2.5 py-1 rounded-full"
                           style={{ backgroundColor: colors.bg, color: colors.text }}>{f.house}</span>
                       </td>
+                      {user.is_admin && (
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button onClick={() => openEditFixed(f)}
+                              className="text-xs px-2.5 py-1.5 rounded-lg font-medium border bg-white text-[#4a7c59] border-[#4a7c59]/30 hover:bg-green-50 transition-colors"
+                              title="Editar reserva">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
+                            <button onClick={() => deleteFixed(f.id)}
+                              className="text-xs px-2.5 py-1.5 rounded-lg font-medium border bg-white text-red-500 border-red-200 hover:bg-red-50 transition-colors"
+                              title="Excluir reserva">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   )
                 })
@@ -736,6 +794,68 @@ function FixedTab({ user, fixedRes, onRequest, onRefresh }: {
           </table>
         </div>
       </div>
+
+      {/* EDIT FIXED RESERVATION MODAL (admin only) */}
+      {editingFixed && user.is_admin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setEditingFixed(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-lg font-bold text-gray-900">Editar Reserva Fixa</h2>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Casa</label>
+              <select value={editFixedForm.house}
+                onChange={e => setEditFixedForm(f => ({ ...f, house: e.target.value }))}
+                className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#4a7c59]">
+                {[...new Set(allUsers.map(u => u.house))].sort().map(h => (
+                  <option key={h} value={h}>{h}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Dia da semana</label>
+              <select value={editFixedForm.day_of_week}
+                onChange={e => setEditFixedForm(f => ({ ...f, day_of_week: Number(e.target.value) }))}
+                className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#4a7c59]">
+                {DAYS_FULL.map((d, i) => <option key={i} value={i}>{d}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Horário de início</label>
+              <select value={editFixedForm.start_time}
+                onChange={e => setEditFixedForm(f => ({ ...f, start_time: e.target.value }))}
+                className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#4a7c59]">
+                {SLOTS.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Duração</label>
+              <div className="flex gap-2 mt-1">
+                <button onClick={() => setEditFixedForm(f => ({ ...f, duration: 30 }))}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${editFixedForm.duration === 30 ? 'bg-[#4a7c59] text-white border-[#4a7c59]' : 'bg-white text-gray-600 border-gray-200'}`}>
+                  30 min
+                </button>
+                <button onClick={() => setEditFixedForm(f => ({ ...f, duration: 60 }))}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${editFixedForm.duration === 60 ? 'bg-[#4a7c59] text-white border-[#4a7c59]' : 'bg-white text-gray-600 border-gray-200'}`}>
+                  1 hora
+                </button>
+              </div>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 text-sm text-gray-600">
+              <p><span className="font-semibold">{editFixedForm.house}</span> · {DAYS_FULL[editFixedForm.day_of_week]}</p>
+              <p className="font-bold text-gray-900">{editFixedForm.start_time} — {calcEndTime(editFixedForm.start_time, editFixedForm.duration)}</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setEditingFixed(null)}
+                className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
+              <button onClick={saveEditFixed}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                style={{ backgroundColor: '#4a7c59' }}>
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
