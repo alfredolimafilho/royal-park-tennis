@@ -129,17 +129,21 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
     const dayOfWeek = date.getDay()
     const slotEnd = calcEndTime(time)
 
-    // Check fixed reservations
+    // Check fixed reservations (slice to 5 chars to compare HH:MM without seconds)
     for (const fr of fixedRes) {
-      if (fr.day_of_week === dayOfWeek && fr.start_time <= time && fr.end_time > time) {
-        return { type: 'fixed', house: fr.house, name: fr.users?.name, phone: fr.users?.phone, id: fr.id, userId: fr.user_id, startTime: fr.start_time.slice(0, 5), endTime: fr.end_time.slice(0, 5) }
+      const fStart = fr.start_time.slice(0, 5)
+      const fEnd = fr.end_time.slice(0, 5)
+      if (fr.day_of_week === dayOfWeek && fStart <= time && fEnd > time) {
+        return { type: 'fixed', house: fr.house, name: fr.users?.name, phone: fr.users?.phone, id: fr.id, userId: fr.user_id, startTime: fStart, endTime: fEnd }
       }
     }
 
     // Check regular reservations
     for (const r of reservations) {
-      if (r.reservation_date === dateStr && r.start_time <= time && r.end_time > time) {
-        return { type: 'reservation', house: r.house, name: r.users?.name, phone: r.phone || undefined, id: r.id, userId: r.user_id, startTime: r.start_time.slice(0, 5), endTime: r.end_time.slice(0, 5) }
+      const rStart = r.start_time.slice(0, 5)
+      const rEnd = r.end_time.slice(0, 5)
+      if (r.reservation_date === dateStr && rStart <= time && rEnd > time) {
+        return { type: 'reservation', house: r.house, name: r.users?.name, phone: r.phone || undefined, id: r.id, userId: r.user_id, startTime: rStart, endTime: rEnd }
       }
     }
 
