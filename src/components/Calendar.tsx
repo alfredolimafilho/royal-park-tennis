@@ -2,85 +2,14 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-
-type User = { id: string; name: string; house: string; phone: string; is_admin: boolean }
-type Reservation = {
-  id: string; user_id: string; house: string; phone: string | null
-  reservation_date: string; start_time: string; end_time: string; notes: string | null
-  users?: { name: string }
-}
-type FixedReservation = {
-  id: string; user_id: string; house: string
-  day_of_week: number; start_time: string; end_time: string; status: string
-  users?: { name: string; phone: string }
-}
-
-const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
-const DAYS_FULL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
-const SLOTS: string[] = []
-for (let h = 5; h < 23; h++) {
-  SLOTS.push(`${String(h).padStart(2, '0')}:00`)
-  SLOTS.push(`${String(h).padStart(2, '0')}:30`)
-}
-
-function getWeekDates(baseDate: Date): Date[] {
-  const d = new Date(baseDate)
-  const day = d.getDay()
-  const start = new Date(d)
-  start.setDate(d.getDate() - day)
-  return Array.from({ length: 7 }, (_, i) => {
-    const dt = new Date(start)
-    dt.setDate(start.getDate() + i)
-    return dt
-  })
-}
-
-function fmtDateISO(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function calcEndTime(slot: string, durationMin: number = 60): string {
-  const [h, m] = slot.split(':').map(Number)
-  const totalMin = h * 60 + m + durationMin
-  return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`
-}
-
-function whatsappLink(phone: string, house: string): string {
-  const clean = phone.replace(/\D/g, '')
-  const num = clean.startsWith('55') ? clean : `55${clean}`
-  return `https://wa.me/${num}?text=${encodeURIComponent(`Olá! Sou da ${house} do Royal Park, sobre a reserva da quadra de tênis...`)}`
-}
-
-// Cor fixa por casa — hash determinístico para mesma casa = mesma cor sempre
-const PALETTE = [
-  { bg: '#dcfce7', text: '#166534', border: '#86efac' },
-  { bg: '#dbeafe', text: '#1e40af', border: '#93c5fd' },
-  { bg: '#fce7f3', text: '#9d174d', border: '#f9a8d4' },
-  { bg: '#fef3c7', text: '#92400e', border: '#fcd34d' },
-  { bg: '#e0e7ff', text: '#3730a3', border: '#a5b4fc' },
-  { bg: '#ffe4e6', text: '#9f1239', border: '#fda4af' },
-  { bg: '#ecfeff', text: '#155e75', border: '#67e8f9' },
-  { bg: '#fdf4ff', text: '#86198f', border: '#e879f9' },
-  { bg: '#fff7ed', text: '#9a3412', border: '#fdba74' },
-  { bg: '#f0fdf4', text: '#15803d', border: '#4ade80' },
-  { bg: '#fef9c3', text: '#854d0e', border: '#facc15' },
-  { bg: '#e8d5f5', text: '#6b21a8', border: '#c084fc' },
-  { bg: '#d1fae5', text: '#065f46', border: '#34d399' },
-  { bg: '#fee2e2', text: '#991b1b', border: '#f87171' },
-  { bg: '#cffafe', text: '#164e63', border: '#22d3ee' },
-  { bg: '#fde68a', text: '#78350f', border: '#f59e0b' },
-]
-function hashCode(str: string): number {
-  let h = 0
-  for (let i = 0; i < str.length; i++) {
-    h = ((h << 5) - h) + str.charCodeAt(i)
-    h |= 0
-  }
-  return Math.abs(h)
-}
-function getHouseColor(house: string) {
-  return PALETTE[hashCode(house) % PALETTE.length]
-}
+import type { User, Reservation, FixedReservation } from '@/lib/types'
+import {
+  DAYS, DAYS_FULL, SLOTS,
+  getWeekDates, fmtDateISO, calcEndTime,
+  whatsappLink, getHouseColor,
+  getSlotOccupant as _getSlotOccupant,
+  canReserve as _canReserve,
+} from '@/lib/calendar-utils'
 
 export default function Calendar({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [weekBase, setWeekBase] = useState(new Date())
@@ -123,93 +52,11 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
 
   useEffect(() => { load() }, [load])
 
-  // Get what occupies a slot
-  function getSlotOccupant(date: Date, time: string): { type: 'fixed' | 'reservation'; house: string; name?: string; phone?: string; id?: string; userId?: string; startTime?: string; endTime?: string } | null {
-    const dateStr = fmtDateISO(date)
-    const dayOfWeek = date.getDay()
-    const slotEnd = calcEndTime(time)
+  const getSlotOccupant = (date: Date, time: string) =>
+    _getSlotOccupant(date, time, reservations, fixedRes)
 
-    // Check fixed reservations (slice to 5 chars to compare HH:MM without seconds)
-    for (const fr of fixedRes) {
-      const fStart = fr.start_time.slice(0, 5)
-      const fEnd = fr.end_time.slice(0, 5)
-      if (fr.day_of_week === dayOfWeek && fStart <= time && fEnd > time) {
-        return { type: 'fixed', house: fr.house, name: fr.users?.name, phone: fr.users?.phone, id: fr.id, userId: fr.user_id, startTime: fStart, endTime: fEnd }
-      }
-    }
-
-    // Check regular reservations
-    for (const r of reservations) {
-      const rStart = r.start_time.slice(0, 5)
-      const rEnd = r.end_time.slice(0, 5)
-      if (r.reservation_date === dateStr && rStart <= time && rEnd > time) {
-        return { type: 'reservation', house: r.house, name: r.users?.name, phone: r.phone || undefined, id: r.id, userId: r.user_id, startTime: rStart, endTime: rEnd }
-      }
-    }
-
-    return null
-  }
-
-  // Check if a house can reserve at this date (max 1h contiguous, max 2 distinct slots)
-  function canReserve(date: string, startTime: string, dur: number = 60): { ok: boolean; reason?: string } {
-    const endTime = calcEndTime(startTime, dur)
-    const dayOfWeek = new Date(date + 'T12:00:00').getDay()
-
-    // Check end time doesn't exceed 23:00
-    if (endTime > '23:00') return { ok: false, reason: 'A quadra funciona até 23:00.' }
-
-    // Check if any slot in the range is already taken
-    const dt = new Date(date + 'T12:00:00')
-    for (const slot of SLOTS) {
-      if (slot >= startTime && slot < endTime && getSlotOccupant(dt, slot)) {
-        return { ok: false, reason: 'Horário já reservado.' }
-      }
-    }
-
-    // Count existing reservations for this house on this date
-    const houseResOnDate = reservations.filter(r =>
-      r.reservation_date === date && r.house === user.house
-    )
-    const houseFixedOnDay = fixedRes.filter(f =>
-      f.day_of_week === dayOfWeek && f.house === user.house
-    )
-
-    const totalSlots = houseResOnDate.length + houseFixedOnDay.length
-    if (totalSlots >= 2) return { ok: false, reason: 'Sua casa já tem 2 reservas neste dia.' }
-
-    // Check total contiguous time doesn't exceed 1h
-    // A new reservation can't be adjacent to an existing one if together they exceed 1h
-    for (const r of houseResOnDate) {
-      const rStart = r.start_time.slice(0, 5)
-      const rEnd = r.end_time.slice(0, 5)
-      // Calculate existing duration in minutes
-      const [rh1, rm1] = rStart.split(':').map(Number)
-      const [rh2, rm2] = rEnd.split(':').map(Number)
-      const existingDur = (rh2 * 60 + rm2) - (rh1 * 60 + rm1)
-      // If adjacent and combined > 60min, block
-      if (r.end_time.slice(0, 5) === startTime && existingDur + dur > 60) {
-        return { ok: false, reason: 'Não é permitido ultrapassar 1h seguida de reserva.' }
-      }
-      if (endTime === rStart && existingDur + dur > 60) {
-        return { ok: false, reason: 'Não é permitido ultrapassar 1h seguida de reserva.' }
-      }
-    }
-    for (const f of houseFixedOnDay) {
-      const fStart = f.start_time.slice(0, 5)
-      const fEnd = f.end_time.slice(0, 5)
-      const [fh1, fm1] = fStart.split(':').map(Number)
-      const [fh2, fm2] = fEnd.split(':').map(Number)
-      const existingDur = (fh2 * 60 + fm2) - (fh1 * 60 + fm1)
-      if (fEnd === startTime && existingDur + dur > 60) {
-        return { ok: false, reason: 'Não é permitido ultrapassar 1h seguida (inclui sua reserva fixa).' }
-      }
-      if (endTime === fStart && existingDur + dur > 60) {
-        return { ok: false, reason: 'Não é permitido ultrapassar 1h seguida (inclui sua reserva fixa).' }
-      }
-    }
-
-    return { ok: true }
-  }
+  const canReserve = (date: string, startTime: string, dur: number = 60) =>
+    _canReserve(date, startTime, dur, reservations, fixedRes, user.house)
 
   const openCreateModal = (date: string, time: string) => {
     setSelectedSlot({ date, time })
