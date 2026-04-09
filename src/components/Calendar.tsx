@@ -777,14 +777,25 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
           <h2 className="text-xl font-bold text-gray-900">Reservas Fixas</h2>
           <p className="text-sm text-gray-500">Horários fixos semanais aprovados</p>
         </div>
-        <button onClick={onRequest}
-          className="flex items-center gap-2 px-4 py-2.5 text-white text-sm font-semibold rounded-xl"
-          style={{ backgroundColor: '#4a7c59' }}>
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Solicitar Reserva Fixa
-        </button>
+        <div className="flex items-center gap-2">
+          {myFixed.some(f => f.status === 'approved') && (
+            <button onClick={() => openAbsenceModal()}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl border border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100 transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              Registrar Ausência
+            </button>
+          )}
+          <button onClick={onRequest}
+            className="flex items-center gap-2 px-4 py-2.5 text-white text-sm font-semibold rounded-xl"
+            style={{ backgroundColor: '#4a7c59' }}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Solicitar Reserva Fixa
+          </button>
+        </div>
       </div>
 
       {/* My requests */}
