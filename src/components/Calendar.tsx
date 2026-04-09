@@ -15,7 +15,7 @@ type FixedReservation = {
   users?: { name: string; phone: string }
 }
 type AbsenceRegistration = {
-  id: string; user_id: string; fixed_reservation_id: string
+  id: string; user_id: string
   start_date: string; end_date: string; created_at: string
 }
 
@@ -143,9 +143,9 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
       const fStart = fr.start_time.slice(0, 5)
       const fEnd = fr.end_time.slice(0, 5)
       if (fr.day_of_week === dayOfWeek && fStart <= time && fEnd > time) {
-        // Skip if there's an active absence for this fixed reservation on this date
+        // Skip if the user has an active absence for this date
         const hasAbsence = absences.some(a =>
-          a.fixed_reservation_id === fr.id && a.start_date <= dateStr && a.end_date >= dateStr
+          a.user_id === fr.user_id && a.start_date <= dateStr && a.end_date >= dateStr
         )
         if (hasAbsence) continue
         return { type: 'fixed', house: fr.house, name: fr.users?.name, phone: fr.users?.phone, id: fr.id, userId: fr.user_id, startTime: fStart, endTime: fEnd }
@@ -186,7 +186,7 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
     )
     const houseFixedOnDay = fixedRes.filter(f =>
       f.day_of_week === dayOfWeek && f.house === user.house &&
-      !absences.some(a => a.fixed_reservation_id === f.id && a.start_date <= date && a.end_date >= date)
+      !absences.some(a => a.user_id === f.user_id && a.start_date <= date && a.end_date >= date)
     )
 
     const totalSlots = houseResOnDate.length + houseFixedOnDay.length
@@ -672,9 +672,9 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
   const [editFixedForm, setEditFixedForm] = useState({ day_of_week: 0, start_time: '17:00', duration: 60 as 30 | 60, house: '' })
 
   // Absence registration state
-  const [myAbsences, setMyAbsences] = useState<(AbsenceRegistration & { fixed_reservations?: { day_of_week: number; start_time: string; end_time: string } })[]>([])
+  const [myAbsences, setMyAbsences] = useState<AbsenceRegistration[]>([])
   const [showAbsenceModal, setShowAbsenceModal] = useState(false)
-  const [absenceForm, setAbsenceForm] = useState({ fixed_reservation_id: '', start_date: '', end_date: '' })
+  const [absenceForm, setAbsenceForm] = useState({ start_date: '', end_date: '' })
   const [absenceLoading, setAbsenceLoading] = useState(false)
 
   const loadFixed = useCallback(async () => {
@@ -690,7 +690,7 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
   const loadAbsences = useCallback(async () => {
     const { data } = await supabase
       .from('absence_registrations')
-      .select('*, fixed_reservations(day_of_week, start_time, end_time)')
+      .select('*')
       .eq('user_id', user.id)
       .gte('end_date', fmtDateISO(new Date()))
       .order('start_date')
@@ -718,19 +718,14 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
     setEditingFixed(f)
   }
 
-  const openAbsenceModal = (fixedId?: string) => {
+  const openAbsenceModal = () => {
     const today = fmtDateISO(new Date())
-    const myApproved = myFixed.filter(f => f.status === 'approved')
-    setAbsenceForm({
-      fixed_reservation_id: fixedId || myApproved[0]?.id || '',
-      start_date: today,
-      end_date: today,
-    })
+    setAbsenceForm({ start_date: today, end_date: today })
     setShowAbsenceModal(true)
   }
 
   const saveAbsence = async () => {
-    if (!absenceForm.fixed_reservation_id || !absenceForm.start_date || !absenceForm.end_date) return
+    if (!absenceForm.start_date || !absenceForm.end_date) return
     if (absenceForm.end_date < absenceForm.start_date) {
       alert('A data final deve ser igual ou posterior à data inicial.')
       return
@@ -738,7 +733,6 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
     setAbsenceLoading(true)
     await supabase.from('absence_registrations').insert({
       user_id: user.id,
-      fixed_reservation_id: absenceForm.fixed_reservation_id,
       start_date: absenceForm.start_date,
       end_date: absenceForm.end_date,
     })
@@ -835,29 +829,22 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
         <div>
           <h3 className="text-sm font-semibold text-orange-600 mb-2">Minhas ausências registradas</h3>
           <div className="grid gap-2">
-            {myAbsences.map(a => {
-              const fr = a.fixed_reservations
-              return (
-                <div key={a.id} className="bg-white rounded-xl border border-orange-200 p-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">
-                      {new Date(a.start_date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                      {' — '}
-                      {new Date(a.end_date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                    </p>
-                    {fr && (
-                      <p className="text-xs text-gray-500">
-                        Reserva: {DAYS_FULL[fr.day_of_week]} · {fr.start_time.slice(0, 5)} — {fr.end_time.slice(0, 5)}
-                      </p>
-                    )}
-                  </div>
-                  <button onClick={() => deleteAbsence(a.id)}
-                    className="text-xs px-3 py-1.5 rounded-lg font-medium border bg-white text-red-500 border-red-200 hover:bg-red-50 transition-colors">
-                    Cancelar
-                  </button>
+            {myAbsences.map(a => (
+              <div key={a.id} className="bg-white rounded-xl border border-orange-200 p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {new Date(a.start_date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                    {' — '}
+                    {new Date(a.end_date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                  </p>
+                  <p className="text-xs text-gray-500">Todas as reservas fixas liberadas neste período</p>
                 </div>
-              )
-            })}
+                <button onClick={() => deleteAbsence(a.id)}
+                  className="text-xs px-3 py-1.5 rounded-lg font-medium border bg-white text-red-500 border-red-200 hover:bg-red-50 transition-colors">
+                  Cancelar
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -989,34 +976,15 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
             <h2 className="text-lg font-bold text-gray-900">Registrar Ausência</h2>
             <p className="text-sm text-gray-500">
-              Informe o período em que estará ausente. Sua reserva fixa ficará disponível para reservas avulsas durante esse período.
+              Informe o período em que estará ausente. Todas as suas reservas fixas ficarão disponíveis para reservas avulsas durante esse período.
             </p>
 
-            {myFixed.filter(f => f.status === 'approved').length > 1 && (
-              <div>
-                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Reserva fixa</label>
-                <select value={absenceForm.fixed_reservation_id}
-                  onChange={e => setAbsenceForm(f => ({ ...f, fixed_reservation_id: e.target.value }))}
-                  className="w-full mt-1 px-4 py-3 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:border-[#4a7c59]">
-                  {myFixed.filter(f => f.status === 'approved').map(f => (
-                    <option key={f.id} value={f.id}>
-                      {DAYS_FULL[f.day_of_week]} · {f.start_time.slice(0, 5)} — {f.end_time.slice(0, 5)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {(() => {
-              const selected = myFixed.find(f => f.id === absenceForm.fixed_reservation_id)
-              if (!selected) return null
-              return (
-                <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-sm text-orange-800">
-                  <p className="font-semibold">{DAYS_FULL[selected.day_of_week]}</p>
-                  <p className="text-xs">{selected.start_time.slice(0, 5)} — {selected.end_time.slice(0, 5)}</p>
-                </div>
-              )
-            })()}
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-sm text-orange-800">
+              <p className="font-semibold mb-1">Reservas que serão liberadas:</p>
+              {myFixed.filter(f => f.status === 'approved').map(f => (
+                <p key={f.id} className="text-xs">{DAYS_FULL[f.day_of_week]} · {f.start_time.slice(0, 5)} — {f.end_time.slice(0, 5)}</p>
+              ))}
+            </div>
 
             <div>
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Data de início da ausência</label>
@@ -1044,7 +1012,7 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
               <button onClick={() => setShowAbsenceModal(false)}
                 className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
               <button onClick={saveAbsence}
-                disabled={absenceLoading || !absenceForm.fixed_reservation_id || !absenceForm.start_date || !absenceForm.end_date || absenceForm.end_date < absenceForm.start_date}
+                disabled={absenceLoading || !absenceForm.start_date || !absenceForm.end_date || absenceForm.end_date < absenceForm.start_date}
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-colors"
                 style={{ backgroundColor: '#e97b1e' }}>
                 {absenceLoading ? 'Salvando...' : 'Confirmar Ausência'}
