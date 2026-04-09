@@ -15,7 +15,7 @@ type FixedReservation = {
   users?: { name: string; phone: string }
 }
 type AbsenceRegistration = {
-  id: string; user_id: string
+  id: string; user_id: string; fixed_reservation_id: string
   start_date: string; end_date: string; created_at: string
 }
 
@@ -143,9 +143,9 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
       const fStart = fr.start_time.slice(0, 5)
       const fEnd = fr.end_time.slice(0, 5)
       if (fr.day_of_week === dayOfWeek && fStart <= time && fEnd > time) {
-        // Skip if the user has an active absence for this date
+        // Skip if there's an active absence for this fixed reservation on this date
         const hasAbsence = absences.some(a =>
-          a.user_id === fr.user_id && a.start_date <= dateStr && a.end_date >= dateStr
+          a.fixed_reservation_id === fr.id && a.start_date <= dateStr && a.end_date >= dateStr
         )
         if (hasAbsence) continue
         return { type: 'fixed', house: fr.house, name: fr.users?.name, phone: fr.users?.phone, id: fr.id, userId: fr.user_id, startTime: fStart, endTime: fEnd }
@@ -186,7 +186,7 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
     )
     const houseFixedOnDay = fixedRes.filter(f =>
       f.day_of_week === dayOfWeek && f.house === user.house &&
-      !absences.some(a => a.user_id === f.user_id && a.start_date <= date && a.end_date >= date)
+      !absences.some(a => a.fixed_reservation_id === f.id && a.start_date <= date && a.end_date >= date)
     )
 
     const totalSlots = houseResOnDate.length + houseFixedOnDay.length
@@ -730,12 +730,17 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
       alert('A data final deve ser igual ou posterior à data inicial.')
       return
     }
+    const myApproved = myFixed.filter(f => f.status === 'approved')
+    if (myApproved.length === 0) return
     setAbsenceLoading(true)
-    await supabase.from('absence_registrations').insert({
-      user_id: user.id,
-      start_date: absenceForm.start_date,
-      end_date: absenceForm.end_date,
-    })
+    await supabase.from('absence_registrations').insert(
+      myApproved.map(f => ({
+        user_id: user.id,
+        fixed_reservation_id: f.id,
+        start_date: absenceForm.start_date,
+        end_date: absenceForm.end_date,
+      }))
+    )
     setAbsenceLoading(false)
     setShowAbsenceModal(false)
     loadAbsences()
