@@ -809,12 +809,6 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
                   <p className="text-xs text-gray-500">{f.start_time.slice(0, 5)} — {f.end_time.slice(0, 5)}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {f.status === 'approved' && (
-                    <button onClick={() => openAbsenceModal(f.id)}
-                      className="text-xs px-3 py-1.5 rounded-lg font-medium border bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 transition-colors">
-                      Registrar Ausência
-                    </button>
-                  )}
                   <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
                     f.status === 'approved' ? 'bg-green-50 text-green-700' :
                     f.status === 'rejected' ? 'bg-red-50 text-red-600' :
