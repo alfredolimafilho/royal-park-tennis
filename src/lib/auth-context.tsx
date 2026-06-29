@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { supabase } from './supabase'
+import { normalizePhone, phoneVariants } from './phone'
 
 type User = {
   id: string
@@ -36,31 +37,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (phone: string): Promise<{ error?: string }> => {
-    const cleanPhone = phone.replace(/\D/g, '')
+    const variants = phoneVariants(phone)
+    if (variants.length === 0) return { error: 'Telefone inválido. Verifique o número.' }
+
+    // Busca tolerante a formato (código do país e 9º dígito): aceita qualquer
+    // variação plausível do número salvo no cadastro.
     const { data, error } = await supabase
       .from('users')
       .select('*')
-      .eq('phone', cleanPhone)
-      .single()
+      .in('phone', variants)
+      .limit(1)
 
-    if (error || !data) return { error: 'Telefone não encontrado. Verifique o número ou faça seu cadastro.' }
+    const found = data?.[0]
+    if (error || !found) return { error: 'Telefone não encontrado. Verifique o número ou faça seu cadastro.' }
 
-    setUser(data)
-    localStorage.setItem('rp_user', JSON.stringify(data))
+    setUser(found)
+    localStorage.setItem('rp_user', JSON.stringify(found))
     return {}
   }
 
   const register = async (name: string, house: string, phone: string): Promise<{ error?: string }> => {
-    const cleanPhone = phone.replace(/\D/g, '')
+    const cleanPhone = normalizePhone(phone)
+    if (!cleanPhone) return { error: 'Telefone inválido. Verifique o número.' }
 
     const { data: existing } = await supabase
       .from('users')
       .select('id')
       .eq('house', house)
-      .eq('phone', cleanPhone)
-      .single()
+      .in('phone', phoneVariants(phone))
+      .limit(1)
 
-    if (existing) return { error: 'Essa casa já possui cadastro com este telefone. Faça login.' }
+    if (existing && existing.length > 0) return { error: 'Essa casa já possui cadastro com este telefone. Faça login.' }
 
     const { data, error } = await supabase
       .from('users')
