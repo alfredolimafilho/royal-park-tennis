@@ -92,6 +92,7 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
   const [fixedRes, setFixedRes] = useState<FixedReservation[]>([])
   const [absences, setAbsences] = useState<AbsenceRegistration[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'calendar' | 'fixed' | 'admin'>('calendar')
 
   // Modal states
@@ -111,22 +112,36 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
 
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     const startDate = fmtDateISO(weekDates[0])
     const endDate = fmtDateISO(weekDates[6])
 
-    const [{ data: res }, { data: fixed }, { data: abs }] = await Promise.all([
+    // supabase-js never throws on a failed request — it resolves with { data: null, error }.
+    // We must inspect each error explicitly, otherwise a paused DB / missing table / RLS block
+    // silently blanks the whole calendar and residents just see "nothing", with no clue why.
+    const [resQ, fixedQ, absQ] = await Promise.all([
       supabase.from('reservations').select('*, users:user_id(name)')
         .gte('reservation_date', startDate)
         .lte('reservation_date', endDate)
         .order('start_time'),
-      supabase.from('fixed_reservations').select('*, users(name, phone)').eq('status', 'approved'),
+      supabase.from('fixed_reservations').select('*, users:user_id(name, phone)').eq('status', 'approved'),
       supabase.from('absence_registrations').select('*')
         .lte('start_date', endDate)
         .gte('end_date', startDate),
     ])
-    setReservations(res || [])
-    setFixedRes(fixed || [])
-    setAbsences(abs || [])
+
+    setReservations(resQ.data || [])
+    setFixedRes(fixedQ.data || [])
+    // Absences are optional (feature/table may not exist yet) — never let its failure block the grid.
+    setAbsences(absQ.data || [])
+
+    // Only the two core queries are critical for showing the calendar.
+    if (resQ.error || fixedQ.error) {
+      console.error('Erro ao carregar reservas:', resQ.error || fixedQ.error)
+      setLoadError('Não foi possível carregar as reservas. Verifique sua conexão e tente novamente em instantes.')
+    }
+    if (absQ.error) console.warn('Ausências não carregadas (tabela ausente ou sem permissão):', absQ.error)
+
     setLoading(false)
   }, [weekBase])
 
@@ -376,6 +391,17 @@ export default function Calendar({ user, onLogout }: { user: User; onLogout: () 
                 {weekDates[0].toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} — {weekDates[6].toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
               </p>
             </div>
+
+            {/* Connection / load error banner */}
+            {loadError && (
+              <div className="mb-4 flex items-center justify-between gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                <p className="text-sm text-red-600">{loadError}</p>
+                <button onClick={load}
+                  className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-100 transition-colors">
+                  Tentar novamente
+                </button>
+              </div>
+            )}
 
             {/* Calendar grid */}
             {loading ? (
@@ -679,7 +705,7 @@ function FixedTab({ user, fixedRes, absences, onRequest, onRefresh }: {
 
   const loadFixed = useCallback(async () => {
     const [{ data: fixed }, { data: users }] = await Promise.all([
-      supabase.from('fixed_reservations').select('*, users(name, phone)').order('day_of_week'),
+      supabase.from('fixed_reservations').select('*, users:user_id(name, phone)').order('day_of_week'),
       supabase.from('users').select('id, name, house').order('house'),
     ])
     setAllFixed(fixed || [])
@@ -1046,7 +1072,7 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
   const loadAdmin = useCallback(async () => {
     setLoading(true)
     const [{ data: pend }, { data: res }, { data: users }] = await Promise.all([
-      supabase.from('fixed_reservations').select('*, users(name, house, phone)').eq('status', 'pending'),
+      supabase.from('fixed_reservations').select('*, users:user_id(name, house, phone)').eq('status', 'pending'),
       supabase.from('reservations').select('*').gte('reservation_date', fmtDateISO(new Date())).order('reservation_date'),
       supabase.from('users').select('*').order('house'),
     ])
