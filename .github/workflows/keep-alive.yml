@@ -1,0 +1,46 @@
+# Keep-Alive do Supabase
+#
+# Projetos no plano Free do Supabase são pausados automaticamente após ~7 dias
+# sem atividade. Quando isso acontece, o app "cai": ninguém consegue entrar e
+# nada carrega, até alguém restaurar o projeto manualmente.
+#
+# Este robô faz uma pequena consulta ao banco a cada 3 dias. Isso conta como
+# atividade e impede a pausa por inatividade — então o app não cai mais por
+# esse motivo.
+#
+# Observação: a "anon key" abaixo é pública por natureza (o próprio site a envia
+# para o navegador de cada visitante). Quem protege os dados é o RLS do banco,
+# não o segredo dessa chave. Por isso é seguro deixá-la aqui.
+
+name: Manter Supabase ativo (keep-alive)
+
+on:
+  schedule:
+    # A cada 3 dias, às 12:00 UTC (09:00 no horário de Brasília).
+    - cron: '0 12 */3 * *'
+  # Permite rodar manualmente pelo botão "Run workflow" na aba Actions.
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar o Supabase para manter o projeto ativo
+        env:
+          SUPABASE_URL: https://uvjvalscmxwfrmuwncdc.supabase.co
+          SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV2anZhbHNjbXh3ZnJtdXduY2RjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUwNjc3NDIsImV4cCI6MjA5MDY0Mzc0Mn0.6h-f7_wGu4_LhfywtmGB5Et6YfKhjYLX9c-oWyD4nEk
+        run: |
+          echo "Fazendo ping no Supabase para evitar a pausa por inatividade..."
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${SUPABASE_URL}/rest/v1/users?select=id&limit=1" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
+          echo "Resposta HTTP do Supabase: ${code}"
+          # Qualquer resposta do servidor (2xx, 4xx...) já conta como atividade
+          # e evita a pausa. Só tratamos como falha quando não houve resposta
+          # alguma (código 000 = erro de rede / servidor inacessível).
+          if [ "${code}" = "000" ]; then
+            echo "ERRO: sem resposta do Supabase (rede ou projeto fora do ar)."
+            exit 1
+          fi
+          echo "OK: atividade registrada. Projeto permanece ativo."
