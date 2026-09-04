@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+import { normalizePhone } from '@/lib/phone'
 
 type User = { id: string; name: string; house: string; phone: string; is_admin: boolean }
 type Reservation = {
@@ -1067,7 +1068,7 @@ function AdminTab({ onApprove, onReject }: { onApprove: (id: string) => void; on
 
   const saveUser = async () => {
     if (!editingUser || !editName.trim() || !editPhone.trim()) return
-    const cleanPhone = editPhone.replace(/\D/g, '')
+    const cleanPhone = normalizePhone(editPhone)
     await supabase.from('users').update({ name: editName.trim(), phone: cleanPhone }).eq('id', editingUser.id)
     setEditingUser(null)
     setEditName('')
